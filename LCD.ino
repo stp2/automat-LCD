@@ -15,6 +15,8 @@
 #define SS_PIN 53
 #define RST_PIN 31
 
+#define MAX_TRIES 80
+
 #define MONEY_BLOCK 6
 #define TRAILER_BLOCK 7
 
@@ -63,6 +65,14 @@ void waitButton() {
 
 class RFID {  // handle rfid cards
    private:
+    void reset(void) {
+        digitalWrite(RST_PIN, LOW);
+        delayMicroseconds(5);
+        digitalWrite(RST_PIN, HIGH);
+        delay(50);
+        mfrc522.PCD_Init();
+        delay(4);
+    }
     void askForCard(void) {
         byte bufferLen = 18;
         MFRC522::StatusCode status;
@@ -73,11 +83,15 @@ class RFID {  // handle rfid cards
         lcd.setCursor(0, 1);
         lcd.print("kartu!");
         while (true) {
-            mfrc522.PICC_WakeupA(buffer, &bufferLen);
-            if (mfrc522.PICC_ReadCardSerial()) {  // sometimes timeout, need restart
-                break;
+            for (size_t i = 0; i < MAX_TRIES; i++) {
+                mfrc522.PICC_WakeupA(buffer, &bufferLen);
+                if (mfrc522.PICC_ReadCardSerial()) {  // sometimes timeout, need restart
+                    return;
+                }
+                delay(40);
             }
-            delay(20);
+            Serial.println("Restarting RFID");
+            reset();
         }
     }
     bool startCard(void) {
@@ -112,7 +126,9 @@ class RFID {  // handle rfid cards
     bool readAndDecrease(int32_t bet) {
         int32_t money;
         bool ok = true;
+        reset();
         do {
+            ok = true;
             if (!startCard())
                 ok = false;
             if (mfrc522.MIFARE_GetValue(MONEY_BLOCK, &money) != MFRC522::STATUS_OK)
@@ -135,7 +151,9 @@ class RFID {  // handle rfid cards
     }
     void increase(int32_t win) {
         bool ok = true;
+        reset();
         do {
+            ok = true;
             if (!startCard())
                 ok = false;
             if (mfrc522.MIFARE_Increment(MONEY_BLOCK, win) != MFRC522::STATUS_OK)
