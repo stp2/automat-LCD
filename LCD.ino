@@ -1,4 +1,8 @@
 #include <LiquidCrystal.h>
+#include <MFRC522.h>
+#include <MFRC522Extended.h>
+#include <deprecated.h>
+#include <require_cpp11.h>
 
 #define WHEEL_LEN 16
 #define REELS 3
@@ -7,6 +11,12 @@
 #define LCD_BACKLIGHT 10
 #define BUTTONS A0
 #define RANDOM_PIN A5
+
+#define SS_PIN 53
+#define RST_PIN 31
+
+#define MONEY_BLOCK 6
+#define TRAILER_BLOCK 7
 
 enum buttons {
     NO_BUTTON,
@@ -46,11 +56,100 @@ buttons getButton() {
     if (val < 790) return SELECT;
     return NO_BUTTON;
 }
+void waitButton() {
+    while (getButton() == NO_BUTTON) {
+    }
+}
+
+class RFID {  // handle rfid cards
+   private:
+    void askForCard(void) {
+        byte bufferLen = 18;
+        MFRC522::StatusCode status;
+        MFRC522::Uid uid;
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("Prosim prilozte");
+        lcd.setCursor(0, 1);
+        lcd.print("kartu!");
+        while (true) {
+            mfrc522.PICC_WakeupA(buffer, &bufferLen);
+            if (mfrc522.PICC_ReadCardSerial()) {  // sometimes timeout, need restart
+                break;
+            }
+            delay(20);
+        }
+    }
+    bool startCard(void) {
+        if (!mfrc522.PICC_ReadCardSerial()) {
+            askForCard();
+        }
+        return mfrc522.PCD_Authenticate(MFRC522::PICC_CMD_MF_AUTH_KEY_B, MONEY_BLOCK, &key, &(mfrc522.uid)) == MFRC522::STATUS_OK;
+    }
+    void endCard(void) {
+        mfrc522.PICC_HaltA();
+        mfrc522.PCD_StopCrypto1();
+    }
+    void showMoney(int32_t money) {
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("Zbyva vam:");
+        lcd.setCursor(0, 1);
+        lcd.print(money);
+    }
+
+    MFRC522& mfrc522;
+    MFRC522::MIFARE_Key key;
+    LiquidCrystal& lcd;
+    byte buffer[18];
+
+   public:
+    RFID(MFRC522& mfrc522, LiquidCrystal& lcd) : mfrc522(mfrc522), lcd(lcd) {
+        for (byte i = 0; i < 6; i++) {  // default key
+            key.keyByte[i] = 0xFF;
+        }
+    }
+    bool readAndDecrease(int32_t bet) {
+        int32_t money;
+        bool ok = true;
+        do {
+            if (!startCard())
+                ok = false;
+            if (mfrc522.MIFARE_GetValue(MONEY_BLOCK, &money) != MFRC522::STATUS_OK)
+                ok = false;
+            if (money < bet) {
+                endCard();
+                return false;
+            }
+            if (mfrc522.MIFARE_Decrement(MONEY_BLOCK, bet) != MFRC522::STATUS_OK)
+                ok = false;
+            if (mfrc522.MIFARE_Transfer(MONEY_BLOCK) != MFRC522::STATUS_OK)
+                ok = false;
+            endCard();
+            showMoney(money - bet);
+            while (getButton() != NO_BUTTON) {  // wait for button release, from select
+            }
+            waitButton();
+        } while (!ok);
+        return true;
+    }
+    void increase(int32_t win) {
+        bool ok = true;
+        do {
+            if (!startCard())
+                ok = false;
+            if (mfrc522.MIFARE_Increment(MONEY_BLOCK, win) != MFRC522::STATUS_OK)
+                ok = false;
+            if (mfrc522.MIFARE_Transfer(MONEY_BLOCK) != MFRC522::STATUS_OK)
+                ok = false;
+            endCard();
+        } while (!ok);
+    }
+};
 
 class automat {
    private:
     uint16_t price(void) {
-        Serial.println("Price");
         if (wheel[spinnedState[0]] == fruits::DINO && wheel[spinnedState[1]] == fruits::TREE && wheel[spinnedState[2]] == fruits::TREE) {  // dino tree tree
             return BASE_MULTIPLIER * 8;
         }
@@ -59,7 +158,6 @@ class automat {
             sortedState[i] = wheel[spinnedState[i]];
         }
         sortState(sortedState);
-        Serial.println(String(sortedState[0]) + " " + String(sortedState[1]) + " " + String(sortedState[2]));
         if (sortedState[0] == fruits::HEAD && sortedState[2] == fruits::HEAD) {  // all heads
             return BASE_MULTIPLIER * 16;
         }
@@ -164,6 +262,7 @@ class automat {
     }
     void showMat(void) {
         lcd.clear();
+        lcd.print("Bet: ");
         showBet();
         lcd.setCursor(0, 1);
         lcd.print("Win: ");
@@ -192,39 +291,12 @@ class automat {
         lcd.setCursor(0, 1);
         lcd.print("Order: ");
     }
-
-    LiquidCrystal& lcd;
-    uint8_t* wheel;
-    uint8_t state[REELS] = {0, 0, 0};
-    uint8_t spinnedState[REELS];
-    uint32_t lastWin = 0;
-    uint32_t bet = 1;
-
-   public:
-    automat(LiquidCrystal& lcd, uint8_t* wheel) : lcd(lcd), wheel(wheel) {}
-    void shuffleWheel(void) {  // call after srandom
-        for (uint8_t i = WHEEL_LEN - 1; i > 0; --i) {
-            uint8_t j = random(i + 1);
-            uint8_t temp = wheel[i];
-            wheel[i] = wheel[j];
-            wheel[j] = temp;
-        }
-    }
     void play(void) {
         showMat();
         spin();
-        Serial.println("Spin");
-        Serial.println(String(spinnedState[0]) + " " + String(spinnedState[1]) + " " + String(spinnedState[2]));
-        Serial.println(String(wheel[spinnedState[0]]) + " " + String(wheel[spinnedState[1]]) + " " + String(wheel[spinnedState[2]]));
-        Serial.println("Win: " + String(lastWin));
         showSpin();
         showWin();
-        while (true) {  // wait for button
-            buttons button = getButton();
-            if (button != buttons::NO_BUTTON) {
-                break;
-            }
-        }
+        waitButton();
     }
     void selectBet(void) {
         buttons button;
@@ -281,11 +353,43 @@ class automat {
             }
         }
     }
+
+    LiquidCrystal& lcd;
+    uint8_t* wheel;
+    uint8_t state[REELS] = {0, 0, 0};
+    uint8_t spinnedState[REELS];
+    int32_t lastWin = 0;
+    int32_t bet = 1;
+    RFID& rfid;
+
+   public:
+    automat(LiquidCrystal& lcd, uint8_t* wheel, RFID& rfid) : lcd(lcd), wheel(wheel), rfid(rfid) {}
+    void shuffleWheel(void) {  // call after srandom
+        for (uint8_t i = WHEEL_LEN - 1; i > 0; --i) {
+            uint8_t j = random(i + 1);
+            uint8_t temp = wheel[i];
+            wheel[i] = wheel[j];
+            wheel[j] = temp;
+        }
+    }
+    void handleGame(void) {
+        selectBet();
+        if (!rfid.readAndDecrease(bet)) {
+            return;
+        }
+        play();
+        if (lastWin > 0) {
+            waitButton();
+            rfid.increase(lastWin);
+        }
+    }
 };
 
 uint8_t wheel[] = {fruits::TWO, fruits::CHERRY, fruits::CHERRY, fruits::CHERRY, fruits::APPLE, fruits::APPLE, fruits::PEAR, fruits::PEAR, fruits::PEAR, fruits::BANANA, fruits::BANANA, fruits::TREE, fruits::TREE, fruits::DINO, fruits::DINO, fruits::HEAD};
 LiquidCrystal lcd(8, 9, 4, 5, 6, 7);
-automat mat(lcd, wheel);
+MFRC522 mfrc522(SS_PIN, RST_PIN);
+RFID rfid(mfrc522, lcd);
+automat mat(lcd, wheel, rfid);
 
 void customCharacterLoad(LiquidCrystal& lcd, const char* data, byte addr) {
     uint8_t buffer[8];
@@ -310,11 +414,15 @@ void setup() {
     // mat init
     mat.shuffleWheel();
 
+    // RFID init
+    SPI.begin();
+    mfrc522.PCD_Init();
+    delay(4);
+
     Serial.begin(9600);
     Serial.println("Start");
 }
 
 void loop() {
-    mat.selectBet();
-    mat.play();
+    mat.handleGame();
 }
