@@ -2,11 +2,20 @@
 
 #define WHEEL_LEN 16
 #define REELS 3
-#define BASE_MULTIPLIER 1
+#define BASE_MULTIPLIER 1  // how much to multiply win
 
 #define LCD_BACKLIGHT 10
 #define BUTTONS A0
+#define RANDOM_PIN A5
 
+enum buttons {
+    NO_BUTTON,
+    SELECT,
+    LEFT,
+    DOWN,
+    UP,
+    RIGHT
+};
 enum fruits {
     TWO,
     DINO,
@@ -26,6 +35,17 @@ const char apple[8] PROGMEM = {0x04, 0x04, 0x0E, 0x1F, 0x1F, 0x1F, 0x0E, 0x00};
 const char pear[8] PROGMEM = {0x00, 0x04, 0x04, 0x0E, 0x0E, 0x1F, 0x1F, 0x0E};
 const char banana[8] PROGMEM = {0x02, 0x04, 0x0C, 0x0C, 0x18, 0x1C, 0x0E, 0x06};
 const char* const fruitsChars[8] PROGMEM = {two, dino, tree, head, cherry, apple, pear, banana};
+
+buttons getButton() {
+    int val = analogRead(BUTTONS);
+    if (val > 1000) return NO_BUTTON;
+    if (val < 50) return RIGHT;
+    if (val < 195) return UP;
+    if (val < 380) return DOWN;
+    if (val < 555) return LEFT;
+    if (val < 790) return SELECT;
+    return NO_BUTTON;
+}
 
 class automat {
    private:
@@ -95,33 +115,11 @@ class automat {
                 break;
         }
     }
-
-    LiquidCrystal& lcd;
-    uint8_t* wheel;
-    uint8_t state[REELS] = {0, 0, 0};
-    uint8_t spinnedState[REELS];
-    uint32_t lastWin;
-    uint32_t bet;
-
-   public:
-    automat(LiquidCrystal& lcd, uint8_t* wheel) : lcd(lcd), wheel(wheel) {}
-    void shuffleWheel(void) {
-        for (uint8_t i = WHEEL_LEN - 1; i > 0; --i) {
-            uint8_t j = random(i + 1);
-            uint8_t temp = wheel[i];
-            wheel[i] = wheel[j];
-            wheel[j] = temp;
-        }
-    }
-    void setBet(uint32_t bet) {
-        this->bet = bet;
-    }
-    uint32_t spin(void) {
+    void spin(void) {
         for (size_t i = 0; i < REELS; i++) {
             spinnedState[i] = random(WHEEL_LEN);
         }
         lastWin = price() * bet;
-        return lastWin;
     }
     void showState(void) {
         lcd.setCursor(13, 0);
@@ -129,7 +127,7 @@ class automat {
             lcd.write(wheel[state[i]]);
         }
     }
-    bool finalState() {
+    bool isFinalState() {
         for (uint8_t i = 0; i < REELS; i++) {
             if (spinnedState[i] != state[i]) {
                 return false;
@@ -147,7 +145,7 @@ class automat {
             delay(100);
         }
         while (true) {
-            if (finalState()) {
+            if (isFinalState()) {
                 break;
             }
             for (size_t i = 0; i < REELS; i++) {
@@ -161,18 +159,59 @@ class automat {
         }
     }
     void showWin(void) {
-        lcd.setCursor(0, 1);
-        lcd.print("Win: ");
+        lcd.setCursor(5, 1);
         lcd.print(lastWin);
     }
-    void clearWin(void) {
+    void showMat(void) {
+        lcd.clear();
+        showBet();
         lcd.setCursor(0, 1);
         lcd.print("Win: ");
+        showState();
+    }
+    void showBet(void) {
+        lcd.setCursor(5, 0);
+        lcd.print(bet);
+    }
+    void clearBet(void) {
+        lcd.setCursor(5, 0);
         lcd.print("           ");
     }
+    void showOrder(uint32_t order) {
+        lcd.setCursor(7, 1);
+        lcd.print(order);
+    }
+    void clearOrder(void) {
+        lcd.setCursor(7, 1);
+        lcd.print("         ");
+    }
+    void showSelect(void) {
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("Bet: ");
+        lcd.setCursor(0, 1);
+        lcd.print("Order: ");
+    }
+
+    LiquidCrystal& lcd;
+    uint8_t* wheel;
+    uint8_t state[REELS] = {0, 0, 0};
+    uint8_t spinnedState[REELS];
+    uint32_t lastWin = 0;
+    uint32_t bet = 1;
+
+   public:
+    automat(LiquidCrystal& lcd, uint8_t* wheel) : lcd(lcd), wheel(wheel) {}
+    void shuffleWheel(void) {  // call after srandom
+        for (uint8_t i = WHEEL_LEN - 1; i > 0; --i) {
+            uint8_t j = random(i + 1);
+            uint8_t temp = wheel[i];
+            wheel[i] = wheel[j];
+            wheel[j] = temp;
+        }
+    }
     void play(void) {
-        clearWin();
-        showState();
+        showMat();
         spin();
         Serial.println("Spin");
         Serial.println(String(spinnedState[0]) + " " + String(spinnedState[1]) + " " + String(spinnedState[2]));
@@ -180,6 +219,67 @@ class automat {
         Serial.println("Win: " + String(lastWin));
         showSpin();
         showWin();
+        while (true) {  // wait for button
+            buttons button = getButton();
+            if (button != buttons::NO_BUTTON) {
+                break;
+            }
+        }
+    }
+    void selectBet(void) {
+        buttons button;
+        uint32_t order = 1;  // change, change no only power
+        bool select = false;
+        bool pushed = true;  // pushed from previous run
+        // fast select
+        button = getButton();
+        if (button == buttons::SELECT) {
+            return;
+        }
+        showSelect();
+        while (true) {
+            showBet();
+            showOrder(order);
+            button = getButton();
+            // debounce
+            if (button != buttons::NO_BUTTON && !pushed) {
+                pushed = true;
+            } else if (button != buttons::NO_BUTTON && pushed) {
+                continue;
+            } else if (button == buttons::NO_BUTTON && pushed) {
+                pushed = false;
+            }
+            switch (button) {
+                case buttons::UP:
+                    bet += order;
+                    clearBet();
+                    break;
+                case buttons::DOWN:
+                    if (bet >= order) {
+                        bet -= order;
+                        clearBet();
+                    }
+                    break;
+                case buttons::LEFT:
+                    order *= 10;
+                    clearOrder();
+                    break;
+                case buttons::RIGHT:
+                    if (order > 1) {
+                        order /= 10;
+                        clearOrder();
+                    }
+                    break;
+                case buttons::SELECT:
+                    select = true;
+                    break;
+                default:
+                    break;
+            }
+            if (select) {
+                break;
+            }
+        }
     }
 };
 
@@ -196,8 +296,8 @@ void customCharacterLoad(LiquidCrystal& lcd, const char* data, byte addr) {
 }
 
 void setup() {
-    pinMode(A5, INPUT);
-    srandom(analogRead(A5));
+    pinMode(RANDOM_PIN, INPUT);
+    srandom(analogRead(RANDOM_PIN));
     pinMode(BUTTONS, INPUT);
     pinMode(LCD_BACKLIGHT, OUTPUT);
     digitalWrite(LCD_BACKLIGHT, HIGH);
@@ -207,18 +307,14 @@ void setup() {
         const char* fruit = (const char*)pgm_read_word(&(fruitsChars[i]));
         customCharacterLoad(lcd, fruit, i);
     }
-    lcd.home();
-    lcd.print("Bet: 10");
+    // mat init
     mat.shuffleWheel();
-    mat.setBet(10);
-    mat.showState();
 
     Serial.begin(9600);
     Serial.println("Start");
 }
 
 void loop() {
-    if (analogRead(BUTTONS) < 1000) {
-        mat.play();
-    }
+    mat.selectBet();
+    mat.play();
 }
