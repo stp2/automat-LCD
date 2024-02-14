@@ -4,6 +4,8 @@
 #include <deprecated.h>
 #include <require_cpp11.h>
 
+#include "music/tetris.h"
+
 #define WHEEL_LEN 16
 #define REELS 3
 #define BASE_MULTIPLIER 1  // how much to multiply win
@@ -19,6 +21,9 @@
 
 #define MONEY_BLOCK 6
 #define TRAILER_BLOCK 7
+
+#define BUZZER 42
+#define TIMER_PRELOAD 652288
 
 enum buttons {
     NO_BUTTON,
@@ -60,6 +65,57 @@ buttons getButton() {
 }
 void waitButton() {
     while (getButton() == NO_BUTTON) {
+    }
+}
+
+struct sound_t {
+    uint32_t timer;
+    uint16_t* song;
+    size_t songLen;
+    size_t songPos;
+    uint16_t frequency;
+    uint16_t duration;
+    bool pause;
+
+    void play(uint16_t* song, size_t songLen) {
+        cli();
+        this->song = song;
+        songPos = 0;
+        this->songLen = songLen;
+        timer = millis();
+        pause = true;
+        sei();
+    }
+    void stop(void) {
+        song = nullptr;
+        noTone(BUZZER);
+    }
+};
+
+sound_t sound;
+ISR(TIMER1_OVF_vect) {
+    TCNT1 = TIMER_PRELOAD;        // Timer Preloading
+    if (sound.song == nullptr) {  // no song
+        return;
+    }
+    if (sound.timer > millis()) {  // no need to change
+        return;
+    }
+    if (!sound.pause) {  // pause beetwen notes
+        sound.timer = millis() + sound.duration >> 4;
+        noTone(BUZZER);
+        sound.pause = true;
+    } else {
+        sound.frequency = pgm_read_word_near(sound.song + 2 * sound.songPos);
+        sound.duration = pgm_read_word_near(sound.song + 2 * sound.songPos + 1);
+        sound.timer = millis() + sound.duration;
+        tone(BUZZER, sound.frequency);
+        if (sound.songPos == sound.songLen / 4 - 1) {
+            sound.songPos = 0;
+        } else {
+            ++sound.songPos;
+        }
+        sound.pause = false;
     }
 }
 
@@ -314,6 +370,9 @@ class automat {
         spin();
         showSpin();
         showWin();
+        if (lastWin > 0) {
+            sound.play(const_cast<uint16_t*>(song), sizeof(song));
+        }
         waitButton();
     }
     void selectBet(void) {
@@ -397,8 +456,8 @@ class automat {
         }
         play();
         if (lastWin > 0) {
-            waitButton();
             rfid.increase(lastWin);
+            sound.stop();
         }
     }
 };
@@ -424,6 +483,7 @@ void setup() {
     pinMode(LCD_BACKLIGHT, OUTPUT);
     digitalWrite(LCD_BACKLIGHT, HIGH);
     lcd.begin(16, 2);
+    pinMode(BUZZER, OUTPUT);
     // custom characters
     for (uint8_t i = 0; i < 8; i++) {
         const char* fruit = (const char*)pgm_read_word(&(fruitsChars[i]));
@@ -436,6 +496,13 @@ void setup() {
     SPI.begin();
     mfrc522.PCD_Init();
     delay(4);
+
+    // song interrut
+    TCCR1A = 0;             // Init Timer1
+    TCCR1B = 0;             // Init Timer1
+    TCCR1B |= B00000011;    // Prescalar = 64
+    TCNT1 = TIMER_PRELOAD;  // Timer Preloading
+    TIMSK1 |= B00000001;    // Enable Timer Overflow Interrupt
 
     Serial.begin(9600);
     Serial.println("Start");
