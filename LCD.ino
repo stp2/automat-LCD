@@ -485,9 +485,10 @@ class automat {
 
 class dino_t {
    public:
-    dino_t(LiquidCrystal& lcd, Adafruit_NeoPixel& rgb) : lcd(lcd), rgb(rgb) {}
+    dino_t(LiquidCrystal& lcd, Adafruit_NeoPixel& rgb) : lcd(lcd), rgb(rgb) {
+        loadDinoScore();
+    }
     void playDino() {
-        uint16_t maxScore;
         // init
         dinoGround = true;
         trees = 0;
@@ -507,12 +508,15 @@ class dino_t {
             game();
         }
     }
-
-    uint16_t maxScore;
+    void saveDinoScore(uint16_t score) {
+        EEPROM.update(0, byte(score));
+        EEPROM.update(1, byte(score >> 8));
+    }
 
    private:
     unsigned long int timerGame;
     unsigned long int timerDino;
+    uint16_t maxScore;
     bool dinoGround = true;
     uint16_t trees = 0;
     byte difficulty = 0x7;
@@ -522,6 +526,11 @@ class dino_t {
     LiquidCrystal& lcd;
     Adafruit_NeoPixel& rgb;
 
+    void loadDinoScore(void) {
+        maxScore = EEPROM.read(1);
+        maxScore <<= 8;
+        maxScore |= EEPROM.read(0);
+    }
     void green() {
         rgb.setPixelColor(0, 0, 64, 0);
     }
@@ -599,9 +608,8 @@ class dino_t {
         lcd.write(fruits::HEAD);
         sound.stop();
         if (score > maxScore) {
-            EEPROM.update(0, byte(score));
-            EEPROM.update(1, byte(score >> 8));
             maxScore = score;
+            saveDinoScore(maxScore);
         }
         lcd.setCursor(3, 1);
         lcd.print(F("MaxScore:"));
@@ -682,19 +690,20 @@ void setup() {
     rgb.begin();
     rgb.clear();
     rgb.show();
-    // maxScore setup
-    dinoGame.maxScore = EEPROM.read(1);
-    dinoGame.maxScore <<= 8;
-    dinoGame.maxScore |= EEPROM.read(0);
 
     Serial.begin(9600);
     Serial.println(F("Start"));
 
-    // hold any button while restarting to start dino
-    if (getButton() != NO_BUTTON) {
+    // hold left button while restarting to start dino
+    uint8_t mode = getButton();
+    if (mode == buttons::LEFT) {
         while (true) {
             dinoGame.playDino();
         }
+    } else if (mode == buttons::UP) {  // reset score
+        dinoGame.saveDinoScore(0);
+    } else if (mode == buttons::RIGHT) {  // add 100 money
+        rfid.increase(100);
     }
 }
 
