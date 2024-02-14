@@ -1,4 +1,5 @@
 #include <Adafruit_NeoPixel.h>
+#include <EEPROM.h>
 #include <LiquidCrystal.h>
 #include <MFRC522.h>
 #include <MFRC522Extended.h>
@@ -28,6 +29,8 @@
 #define TIMER_PRELOAD 652288  // 12.5 ms
 
 #define RGB_PIN 33
+#define CLEAR 0xA0
+#define CHANGE_LEVEL 10
 
 enum buttons {
     NO_BUTTON,
@@ -480,11 +483,166 @@ class automat {
     }
 };
 
+class dino_t {
+   public:
+    dino_t(LiquidCrystal& lcd, Adafruit_NeoPixel& rgb) : lcd(lcd), rgb(rgb) {}
+    void playDino() {
+        uint16_t maxScore;
+        // init
+        dinoGround = true;
+        trees = 0;
+        difficulty = 0x7;
+        refresh = 600;
+        score = 0;
+        lcd.clear();
+        ledDifficulty();
+        // start play music
+        sound.play(const_cast<uint16_t*>(tetris), sizeof(tetris), 2);
+        // game init
+        showDino();
+        printScore();
+        dinoRun = true;
+        // play
+        while (dinoRun) {
+            game();
+        }
+    }
+
+    uint16_t maxScore;
+
+   private:
+    unsigned long int timerGame;
+    unsigned long int timerDino;
+    bool dinoGround = true;
+    uint16_t trees = 0;
+    byte difficulty = 0x7;
+    uint16_t refresh = 600;
+    uint16_t score = 0;
+    bool dinoRun = false;
+    LiquidCrystal& lcd;
+    Adafruit_NeoPixel& rgb;
+
+    void green() {
+        rgb.setPixelColor(0, 0, 64, 0);
+    }
+    void yellow() {
+        rgb.setPixelColor(0, 64, 42, 0);
+    }
+    void red() {
+        rgb.setPixelColor(0, 64, 0, 0);
+    }
+    void ledDifficulty() {
+        switch (difficulty) {
+            case 0b111:
+                green();
+                break;
+            case 0b11:
+                yellow();
+                break;
+            case 0b1:
+                red();
+                break;
+            default:
+                rgb.clear();
+                break;
+        }
+        rgb.show();
+    }
+    void showDino() {
+        if (dinoGround) {
+            lcd.setCursor(1, 0);
+            lcd.write(CLEAR);
+            lcd.setCursor(1, 1);
+        } else {
+            lcd.setCursor(1, 1);
+            lcd.write(CLEAR);
+            lcd.setCursor(1, 0);
+        }
+        lcd.write(fruits::DINO);
+    }
+    void printScore() {
+        lcd.setCursor(6, 0);
+        lcd.print(F("Score:"));
+        lcd.print(score);
+    }
+    void moveTrees() {
+        if (random(0, 2) && (trees & difficulty) == 0) {
+            trees <<= 1;
+            trees |= 0x1;
+        } else {
+            trees <<= 1;
+        }
+        if (trees & 0x8000) {
+            score++;
+            printScore();
+            if (score % CHANGE_LEVEL == 0 && difficulty > 1) {
+                refresh -= 100;
+                difficulty >>= 1;
+                ledDifficulty();
+            }
+        }
+    }
+    void showTrees() {
+        uint16_t mask = 0x8000;
+        for (int i = 0; i < 16; i++) {
+            if (!(dinoGround && mask == 0x4000)) {
+                lcd.setCursor(i, 1);
+                lcd.write(bool(trees & mask) ? fruits::TREE : CLEAR);
+            }
+            mask >>= 1;
+        }
+    }
+    void endDino() {
+        lcd.setCursor(1, 0);
+        lcd.write(CLEAR);
+        lcd.setCursor(1, 1);
+        lcd.write(fruits::HEAD);
+        sound.stop();
+        if (score > maxScore) {
+            EEPROM.update(0, byte(score));
+            EEPROM.update(1, byte(score >> 8));
+            maxScore = score;
+        }
+        lcd.setCursor(3, 1);
+        lcd.print(F("MaxScore:"));
+        lcd.print(maxScore);
+        dinoRun = false;
+        delay(1000);
+        waitButton();
+    }
+    bool button() {
+        return getButton() != NO_BUTTON;
+    }
+    void game() {
+        if (button() && dinoGround &&
+            (millis() - timerDino) >= (refresh / 3)) {
+            dinoGround = false;
+            showDino();
+            timerDino = millis();
+        }
+        if (!dinoGround && (millis() - timerDino) >= ((refresh * 3) >> 1)) {
+            dinoGround = true;
+            showDino();
+            timerDino = millis();
+        }
+        if (dinoGround && (trees & 0x4000)) {  // end
+            endDino();
+            return;
+        }
+        if (millis() - timerGame >= refresh) {
+            moveTrees();
+            showTrees();
+            timerGame = millis();
+        }
+    }
+};
 uint8_t wheel[] = {fruits::TWO, fruits::CHERRY, fruits::CHERRY, fruits::CHERRY, fruits::APPLE, fruits::APPLE, fruits::PEAR, fruits::PEAR, fruits::PEAR, fruits::BANANA, fruits::BANANA, fruits::TREE, fruits::TREE, fruits::DINO, fruits::DINO, fruits::HEAD};
 LiquidCrystal lcd(8, 9, 4, 5, 6, 7);
 MFRC522 mfrc522(SS_PIN, RST_PIN);
 RFID rfid(mfrc522, lcd);
 automat mat(lcd, wheel, rfid);
+Adafruit_NeoPixel rgb(1, RGB_PIN, NEO_RGB + NEO_KHZ800);
+dino_t dinoGame(lcd, rgb);
 
 void customCharacterLoad(LiquidCrystal& lcd, const char* data, byte addr) {
     uint8_t buffer[8];
@@ -509,12 +667,10 @@ void setup() {
     }
     // mat init
     mat.shuffleWheel();
-
     // RFID init
     SPI.begin();
     mfrc522.PCD_Init();
     delay(4);
-
     // song interrut
     TCCR1A = 0;             // Init Timer1
     TCCR1B = 0;             // Init Timer1
@@ -522,8 +678,24 @@ void setup() {
     TCNT1 = TIMER_PRELOAD;  // Timer Preloading
     TIMSK1 |= B00000001;    // Enable Timer Overflow Interrupt
 
+    // RGB
+    rgb.begin();
+    rgb.clear();
+    rgb.show();
+    // maxScore setup
+    dinoGame.maxScore = EEPROM.read(1);
+    dinoGame.maxScore <<= 8;
+    dinoGame.maxScore |= EEPROM.read(0);
+
     Serial.begin(9600);
-    Serial.println("Start");
+    Serial.println(F("Start"));
+
+    // hold any button while restarting to start dino
+    if (getButton() != NO_BUTTON) {
+        while (true) {
+            dinoGame.playDino();
+        }
+    }
 }
 
 void loop() {

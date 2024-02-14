@@ -18,6 +18,8 @@
             "includePath": [
                 "/home/prokop/.arduino15/packages/arduino/hardware/avr/1.8.6/cores/arduino",
                 "/home/prokop/.arduino15/packages/arduino/hardware/avr/1.8.6/variants/mega",
+                "/home/prokop/Arduino/libraries/Adafruit_NeoPixel",
+                "/home/prokop/.arduino15/packages/arduino/hardware/avr/1.8.6/libraries/EEPROM/src",
                 "/home/prokop/Arduino/libraries/LiquidCrystal/src",
                 "/home/prokop/Arduino/libraries/MFRC522/src",
                 "/home/prokop/.arduino15/packages/arduino/hardware/avr/1.8.6/libraries/SPI/src",
