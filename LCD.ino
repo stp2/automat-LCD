@@ -1,3 +1,4 @@
+#include <Adafruit_NeoPixel.h>
 #include <LiquidCrystal.h>
 #include <MFRC522.h>
 #include <MFRC522Extended.h>
@@ -25,6 +26,8 @@
 
 #define BUZZER 42
 #define TIMER_PRELOAD 652288  // 12.5 ms
+
+#define RGB_PIN 33
 
 enum buttons {
     NO_BUTTON,
@@ -76,15 +79,19 @@ struct sound_t {
     size_t songPos;
     uint16_t frequency;
     uint16_t duration;
+    uint8_t octave;
+    uint8_t maxOctave;
     bool pause;
 
-    void play(uint16_t* song, size_t songLen) {
+    void play(uint16_t* song, size_t songLen, uint8_t maxOctave = 0) {
         cli();
         this->song = song;
         songPos = 0;
         this->songLen = songLen;
         timer = millis();
         pause = true;
+        octave = 0;
+        this->maxOctave = maxOctave;
         sei();
     }
     void stop(void) {
@@ -110,9 +117,14 @@ ISR(TIMER1_OVF_vect) {
         sound.frequency = pgm_read_word_near(sound.song + 2 * sound.songPos);
         sound.duration = pgm_read_word_near(sound.song + 2 * sound.songPos + 1);
         sound.timer = millis() + sound.duration;
-        tone(BUZZER, sound.frequency);
+        tone(BUZZER, sound.frequency << sound.octave);
         if (sound.songPos == sound.songLen / 4 - 1) {
             sound.songPos = 0;
+            if (sound.octave < sound.maxOctave) {
+                ++sound.octave;
+            } else {
+                sound.octave = 0;
+            }
         } else {
             ++sound.songPos;
         }
@@ -377,7 +389,7 @@ class automat {
         if (lastWin > 0) {
             sound.play(const_cast<uint16_t*>(ode), sizeof(ode));
         } else {
-            sound.play(const_cast<uint16_t*>(tetris), sizeof(tetris));
+            sound.play(const_cast<uint16_t*>(tetris), sizeof(tetris), 2);
         }
         waitButton();
     }
