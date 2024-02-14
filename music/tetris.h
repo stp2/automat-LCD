@@ -4,7 +4,7 @@
 // 140 bpm
 #define CTVRT 428  // v ms
 
-const uint16_t song[] PROGMEM = {
+const uint16_t tetris[] PROGMEM = {
     e1, CTVRT, h, CTVRT / 2, c1, CTVRT / 2, d1, CTVRT / 2, e1, CTVRT / 4, d1, CTVRT / 4, c1, CTVRT / 2, h, CTVRT / 2,
     a, CTVRT, a, CTVRT / 2, c1, CTVRT / 2, e1, CTVRT, d1, CTVRT / 2, c1, CTVRT / 2,
     h, CTVRT, h, CTVRT / 2, c1, CTVRT / 2, d1, CTVRT, e1, CTVRT,

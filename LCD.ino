@@ -4,6 +4,7 @@
 #include <deprecated.h>
 #include <require_cpp11.h>
 
+#include "music/ode.h"
 #include "music/tetris.h"
 
 #define WHEEL_LEN 16
@@ -23,7 +24,7 @@
 #define TRAILER_BLOCK 7
 
 #define BUZZER 42
-#define TIMER_PRELOAD 652288
+#define TIMER_PRELOAD 652288  // 12.5 ms
 
 enum buttons {
     NO_BUTTON,
@@ -105,7 +106,7 @@ ISR(TIMER1_OVF_vect) {
         sound.timer = millis() + sound.duration >> 4;
         noTone(BUZZER);
         sound.pause = true;
-    } else {
+    } else {  // play note
         sound.frequency = pgm_read_word_near(sound.song + 2 * sound.songPos);
         sound.duration = pgm_read_word_near(sound.song + 2 * sound.songPos + 1);
         sound.timer = millis() + sound.duration;
@@ -198,6 +199,9 @@ class RFID {  // handle rfid cards
             if (mfrc522.MIFARE_Transfer(MONEY_BLOCK) != MFRC522::STATUS_OK)
                 ok = false;
             endCard();
+            if (!ok) {
+                continue;
+            }
             showMoney(money - bet);
             while (getButton() != NO_BUTTON) {  // wait for button release, from select
             }
@@ -371,7 +375,9 @@ class automat {
         showSpin();
         showWin();
         if (lastWin > 0) {
-            sound.play(const_cast<uint16_t*>(song), sizeof(song));
+            sound.play(const_cast<uint16_t*>(ode), sizeof(ode));
+        } else {
+            sound.play(const_cast<uint16_t*>(tetris), sizeof(tetris));
         }
         waitButton();
     }
@@ -457,8 +463,8 @@ class automat {
         play();
         if (lastWin > 0) {
             rfid.increase(lastWin);
-            sound.stop();
         }
+        sound.stop();
     }
 };
 
