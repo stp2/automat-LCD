@@ -6,6 +6,7 @@
 #include <deprecated.h>
 #include <require_cpp11.h>
 
+#include "music/cancan.h"
 #include "music/ode.h"
 #include "music/tetris.h"
 
@@ -390,7 +391,11 @@ class automat {
         showSpin();
         showWin();
         if (lastWin > 0) {
-            sound.play(const_cast<uint16_t*>(ode), sizeof(ode));
+            if (random(2)) {  // Radom win song
+                sound.play(const_cast<uint16_t*>(cancan), sizeof(cancan));
+            } else {
+                sound.play(const_cast<uint16_t*>(ode), sizeof(ode));
+            }
         } else {
             sound.play(const_cast<uint16_t*>(tetris), sizeof(tetris), 2);
         }
