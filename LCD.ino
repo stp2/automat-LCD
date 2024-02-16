@@ -30,6 +30,8 @@
 #define TIMER_PRELOAD 652288  // 12.5 ms
 
 #define RGB_PIN 33
+#define RGB_TIME 250
+
 #define CLEAR 0xA0
 #define CHANGE_LEVEL 10
 
@@ -135,6 +137,59 @@ ISR(TIMER1_OVF_vect) {
         sound.pause = false;
     }
 }
+
+class rgb_t {
+   public:
+    rgb_t(Adafruit_NeoPixel& rgb) : rgb(rgb) {}
+    void clear(void) {
+        rgb.clear();
+        rgb.show();
+    }
+    void green(void) {
+        rgb.setPixelColor(0, 0, 64, 0);
+        rgb.show();
+    }
+    void yellow(void) {
+        rgb.setPixelColor(0, 64, 42, 0);
+        rgb.show();
+    }
+    void red(void) {
+        rgb.setPixelColor(0, 64, 0, 0);
+        rgb.show();
+    }
+    void blue(void) {
+        rgb.setPixelColor(0, 0, 0, 64);
+        rgb.show();
+    }
+    void winLEDInit(void) {
+        timer = millis() - RGB_TIME;
+    }
+    void winLED(void) {
+        if (millis() - timer >= RGB_TIME) {
+            switch (state) {
+                case 0:
+                    green();
+                    break;
+                case 1:
+                    yellow();
+                    break;
+                case 2:
+                    red();
+                    break;
+                case 3:
+                    blue();
+                    break;
+            }
+            state = (state + 1) % 4;
+            timer = millis();
+        }
+    }
+
+   private:
+    Adafruit_NeoPixel& rgb;
+    uint32_t timer;
+    uint8_t state;
+};
 
 class RFID {  // handle rfid cards
    private:
@@ -396,10 +451,15 @@ class automat {
             } else {
                 sound.play(const_cast<uint16_t*>(ode), sizeof(ode));
             }
+            rgb.winLEDInit();
+            while (getButton() == NO_BUTTON) {
+                rgb.winLED();
+            }
+            rgb.clear();
         } else {
             sound.play(const_cast<uint16_t*>(tetris), sizeof(tetris), 2);
+            waitButton();
         }
-        waitButton();
     }
     void selectBet(void) {
         buttons button;
@@ -464,9 +524,10 @@ class automat {
     int32_t lastWin = 0;
     int32_t bet = 1;
     RFID& rfid;
+    rgb_t& rgb;
 
    public:
-    automat(LiquidCrystal& lcd, uint8_t* wheel, RFID& rfid) : lcd(lcd), wheel(wheel), rfid(rfid) {}
+    automat(LiquidCrystal& lcd, uint8_t* wheel, RFID& rfid, rgb_t& rgb) : lcd(lcd), wheel(wheel), rfid(rfid), rgb(rgb) {}
     void shuffleWheel(void) {  // call after srandom
         for (uint8_t i = WHEEL_LEN - 1; i > 0; --i) {
             uint8_t j = random(i + 1);
@@ -490,7 +551,7 @@ class automat {
 
 class dino_t {
    public:
-    dino_t(LiquidCrystal& lcd, Adafruit_NeoPixel& rgb) : lcd(lcd), rgb(rgb) {
+    dino_t(LiquidCrystal& lcd, rgb_t& rgb) : lcd(lcd), rgb(rgb) {
         loadDinoScore();
     }
     void playDino() {
@@ -529,38 +590,28 @@ class dino_t {
     uint16_t score = 0;
     bool dinoRun = false;
     LiquidCrystal& lcd;
-    Adafruit_NeoPixel& rgb;
+    rgb_t& rgb;
 
     void loadDinoScore(void) {
         maxScore = EEPROM.read(1);
         maxScore <<= 8;
         maxScore |= EEPROM.read(0);
     }
-    void green() {
-        rgb.setPixelColor(0, 0, 64, 0);
-    }
-    void yellow() {
-        rgb.setPixelColor(0, 64, 42, 0);
-    }
-    void red() {
-        rgb.setPixelColor(0, 64, 0, 0);
-    }
     void ledDifficulty() {
         switch (difficulty) {
             case 0b111:
-                green();
+                rgb.green();
                 break;
             case 0b11:
-                yellow();
+                rgb.yellow();
                 break;
             case 0b1:
-                red();
+                rgb.red();
                 break;
             default:
                 rgb.clear();
                 break;
         }
-        rgb.show();
     }
     void showDino() {
         if (dinoGround) {
@@ -653,9 +704,10 @@ uint8_t wheel[] = {fruits::TWO, fruits::CHERRY, fruits::CHERRY, fruits::CHERRY, 
 LiquidCrystal lcd(8, 9, 4, 5, 6, 7);
 MFRC522 mfrc522(SS_PIN, RST_PIN);
 RFID rfid(mfrc522, lcd);
-automat mat(lcd, wheel, rfid);
 Adafruit_NeoPixel rgb(1, RGB_PIN, NEO_RGB + NEO_KHZ800);
-dino_t dinoGame(lcd, rgb);
+rgb_t rgbLed(rgb);
+dino_t dinoGame(lcd, rgbLed);
+automat mat(lcd, wheel, rfid, rgbLed);
 
 void customCharacterLoad(LiquidCrystal& lcd, const char* data, byte addr) {
     uint8_t buffer[8];
