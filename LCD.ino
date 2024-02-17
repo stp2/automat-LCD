@@ -619,8 +619,7 @@ class dino_t {
             lcd.write(CLEAR);
             lcd.setCursor(1, 1);
         } else {
-            lcd.setCursor(1, 1);
-            lcd.write(CLEAR);
+            showTrees();  // trees clear dino ground
             lcd.setCursor(1, 0);
         }
         lcd.write(fruits::DINO);
@@ -663,13 +662,13 @@ class dino_t {
         lcd.setCursor(1, 1);
         lcd.write(fruits::HEAD);
         sound.stop();
-        if (score > maxScore) {
+        lcd.setCursor(3, 1);
+        lcd.print(F("MaxScore:"));  // print old max score
+        lcd.print(maxScore);
+        if (score > maxScore) {  // save new max score
             maxScore = score;
             saveDinoScore(maxScore);
         }
-        lcd.setCursor(3, 1);
-        lcd.print(F("MaxScore:"));
-        lcd.print(maxScore);
         dinoRun = false;
         delay(1000);
         waitButton();
